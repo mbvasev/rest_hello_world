@@ -1,1 +1,1 @@
-erl -eval application:start(rest_hello_world) -pa ebin 
+erl -eval application:start(mt4_rest_api) -pa ebin
