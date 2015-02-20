@@ -1,7 +1,7 @@
 %% Feel free to use, reuse and abuse the code in this file.
 
 %% @private
--module(rest_hello_world_app).
+-module(mt4_rest_api_app).
 -behaviour(application).
 
 %% API.

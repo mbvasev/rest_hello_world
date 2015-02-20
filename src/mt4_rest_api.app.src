@@ -1,0 +1,14 @@
+%% Feel free to use, reuse and abuse the code in this file.
+
+{application, mt4_rest_api, [
+	{description, "MT4 REST API"},
+	{vsn, "1"},
+	{modules, []},
+	{registered, [mt4_rest_api_sup]},
+	{applications, [
+		kernel,
+		stdlib
+	]},
+	{mod, {mt4_rest_api_app, []}},
+	{env, []}
+]}.

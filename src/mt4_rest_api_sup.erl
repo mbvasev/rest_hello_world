@@ -1,7 +1,7 @@
 %% Feel free to use, reuse and abuse the code in this file.
 
 %% @private
--module(rest_hello_world_sup).
+-module(mt4_rest_api_sup).
 -behaviour(supervisor).
 
 %% API.
