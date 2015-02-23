@@ -98,13 +98,13 @@ create_balance_op(Req, State)->
 	Login = proplists:get_value(<<"login">>, JsonData),
 	Amount = proplists:get_value(<<"amount">>, JsonData),
 	Comment = proplists:get_value(<<"comment">>, JsonData),
-	io:format("going to call create_balance_operation ~p ~n",[JsonData]),
 	Amm =  bin_to_num(Amount),
-	case mt4_direct_connection:create_balance_operation(binary_to_integer(Login),Amm,binary_to_list(Comment)) of
+	io:format("going to call create_balance_operation ~p ~n",[JsonData]),
+	case mt4_direct_connection:create_balance_operation(binary_to_integer(Login),Amm+0.00,binary_to_list(Comment)) of
 		{ok,Ticket}->
-			ReplyBody = mochijson2:encode({struct, [{ticket, Ticket}]}),
-			{ok, Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
-			{true, Reply, State};
+ 			ReplyBody = mochijson2:encode({struct, [{ticket, Ticket}]}),
+ 			{ok, Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
+			{true,Req,State};
 		{error,_}->
 			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
 			{halt, Reply, State};
@@ -135,11 +135,12 @@ create_account(Req, State)->
 	Country = proplists:get_value(<<"country">>, JsonData),
 	Zip = proplists:get_value(<<"zip">>, JsonData),
 	Comment = "Created by REST API",
+	io:format("Going to call create account ~n"),
 	case catch(mt4_direct_connection:create_account(binary_to_list(Name),binary_to_list(Address),binary_to_list(Email),binary_to_list(City),Comment,binary_to_list(Id),binary_to_list(Phone),binary_to_list(Country),binary_to_list(Zip),"GMART-USD2P",100)) of
 		{ok,Login} ->
-			ReplyBody = mochijson2:encode({struct, [{login, Login}, {balance, 0.00}]}),
+			ReplyBody = mochijson2:encode({struct, [{login, Login}]}),
 			{ok, Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
-			{true, Reply, State};
+			{true, Req, State};
 		{error,_}->
 			{ok, Reply} = cowboy_req:reply(204, [], [], Req),
 			{halt, Reply, State};

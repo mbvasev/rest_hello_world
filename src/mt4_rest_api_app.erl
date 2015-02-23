@@ -22,10 +22,11 @@ start(_Type, _Args) ->
 			{'_', toppage_handler, []}
 		]}
 	]),
-	{ok, _} = cowboy:start_http(http, 100, [{port, 8080}], [
+	{ok,Port} = application:get_env(cowboy_port),
+	{ok, _} = cowboy:start_http(http, 100, [{port, Port}], [
 		{env, [{dispatch, Dispatch}]}
 	]),
-	rest_hello_world_sup:start_link().
+	mt4_rest_api_sup:start_link().
 
 stop(_State) ->
 	ok.

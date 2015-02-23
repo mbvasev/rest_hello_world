@@ -10,5 +10,5 @@
 		stdlib
 	]},
 	{mod, {mt4_rest_api_app, []}},
-	{env, []}
+	{env, [{cowboy_port,8080}]}
 ]}.
