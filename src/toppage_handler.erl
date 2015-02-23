@@ -9,7 +9,7 @@
 -define(BALANCEOPS_RESOURCE,"balanceops").
 -define(RESOURCES,[?ACCOUNTS_RESOURCE,?BALANCEOPS_RESOURCE]).
 
--export([init/3, uri_too_long/2, content_types_accepted/2, known_methods/2, allowed_methods/2, options/2, process_json_request/2, prepare_json_response/2]).
+-export([init/3, content_types_accepted/2, known_methods/2, allowed_methods/2, options/2, process_json_request/2, prepare_json_response/2]).
 %% -export([service_available/2]).
 -export([content_types_provided/2]).
 
@@ -41,24 +41,27 @@ known_methods(Req, State)->
 	io:format("known_methods ~p ~n",[Method]),
 	{[<<"GET">>, <<"POST">>,<<"OPTIONS">>], Req, State}.
 
-uri_too_long(Req, State)->
-	{Path,_} = cowboy_req:path(Req),
-	PathTokens = string:tokens(binary_to_list(Path),"/"),
-	if length(PathTokens)>?MAX_TOKENS ->
-		{true, Req, State};
-	true ->
-		{false, Req, State}
-	end.
+%% uri_too_long(Req, State)->
+%% 	io:format("uri_too_long  ~n"),
+%% 	{Path,_} = cowboy_req:path(Req),
+%% 	PathTokens = string:tokens(binary_to_list(Path),"/"),
+%% 	if length(PathTokens)>?MAX_TOKENS ->
+%% 		{true, Req, State};
+%% 	true ->
+%% 		{false, Req, State}
+%% 	end.
 
 allowed_methods(Req, State)->
 	io:format("allowed_methods ~n"),
-	{ok,Resource} = get_quered_resource(Req),
+%% 	{Path,_} = cowboy_req:path(Req),
+%% 	PathTokens = string:tokens(binary_to_list(Path),"/"),
+	Resource = get_quered_resource(Req),
 	case Resource of
-		?ACCOUNTS_RESOURCE->
-			io:format("ACCOUNTS_RESOURCE ~n"),
-			{[<<"GET">>, <<"POST">>,<<"OPTIONS">>], Req, State};
-		?BALANCEOPS_RESOURCE->
-			io:format("BALANCEOPS_RESOURCE ~n"),
+		{?ACCOUNTS_RESOURCE}->
+			{[<<"POST">>,<<"OPTIONS">>], Req, State};
+		{?ACCOUNTS_RESOURCE,_AccountId}->
+			{[<<"GET">>,<<"OPTIONS">>], Req, State};
+		{?ACCOUNTS_RESOURCE,_AccountId,?BALANCEOPS_RESOURCE} ->
 			{[<<"POST">>,<<"OPTIONS">>], Req, State}
 	end.
 
@@ -71,39 +74,53 @@ content_types_provided(Req, State) ->
 get_quered_resource(Req)->
 	{Path,_} = cowboy_req:path(Req),
 	PathTokens = string:tokens(binary_to_list(Path),"/"),
-
-	Resource = [X || X <- PathTokens, lists:member(X,?RESOURCES)],
-	if length(Resource)=:=1->
-		{ok,hd(Resource)};
-	true ->
-		{error,unknown}
+	io:format("get_quered_resource ~p ~n",[PathTokens]),
+	case PathTokens of
+		["restapi",?ACCOUNTS_RESOURCE]->
+			{?ACCOUNTS_RESOURCE};
+		["restapi",?ACCOUNTS_RESOURCE,_]->
+			{?ACCOUNTS_RESOURCE,lists:nth(3,PathTokens)};
+		["restapi",?ACCOUNTS_RESOURCE,_,?BALANCEOPS_RESOURCE] ->
+			{?ACCOUNTS_RESOURCE,lists:nth(3,PathTokens),?BALANCEOPS_RESOURCE};
+		_->
+			undefined
 	end.
 
 process_json_request(Req, State) ->
-	io:format("put_json ~n"),
+	io:format("process_json_request ~n"),
 	{Origin, _} = cowboy_req:header(<<"origin">>,Req),
 	Reply = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>, Origin, Req),
-	{ok,Resource} = get_quered_resource(Req),
+	Resource = get_quered_resource(Req),
 	case Resource of
-		?ACCOUNTS_RESOURCE->
+		{?ACCOUNTS_RESOURCE}->
 			create_account(Reply,State);
-		?BALANCEOPS_RESOURCE->
-			create_balance_op(Reply, State)
+		{?ACCOUNTS_RESOURCE,AccountId,?BALANCEOPS_RESOURCE} ->
+			create_balance_op(AccountId,Reply, State);
+		_ ->
+			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
+			{halt, Reply, State}
 	end.
 
-create_balance_op(Req, State)->
+create_balance_op(AccountId, Req, State)->
 	io:format("create_balance_op enter~n"),
 	{ok, Body, _} = cowboy_req:body(Req),
 	{struct, JsonData} = mochijson2:decode(Body),
-	Login = proplists:get_value(<<"login">>, JsonData),
 	Amount = proplists:get_value(<<"amount">>, JsonData),
 	Comment = proplists:get_value(<<"comment">>, JsonData),
 	Amm =  bin_to_num(Amount),
+	Login = list_to_integer(AccountId),
+	ValResult =  validate_ballop_params(Login,Amm,Comment),
+	if
+		ValResult =:= false->
+		cowboy_req:reply(404, [], [], Req),
+		{halt, Req, State}
+	end,
+
 	io:format("going to call create_balance_operation ~p ~n",[JsonData]),
-	case mt4_direct_connection:create_balance_operation(binary_to_integer(Login),Amm+0.00,binary_to_list(Comment)) of
+	case mt4_direct_connection:create_balance_operation(Login,Amm,binary_to_list(Comment)) of
 		{ok,Ticket}->
  			ReplyBody = mochijson2:encode({struct, [{ticket, Ticket}]}),
- 			{ok, Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
+ 			{ok, _Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
 			{true,Req,State};
 		{error,_}->
 			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
@@ -115,12 +132,14 @@ create_balance_op(Req, State)->
 			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
 			{halt, Reply, State}
 	end.
+validate_ballop_params(Login,Ammount,Comment)->
+	is_integer(Login) andalso is_float(Ammount) andalso is_list(Comment).
 
 bin_to_num(Bin)->
 	try
 	    binary_to_float(Bin)
 	catch
-	    _:_ -> binary_to_integer(Bin)
+	    _:_ -> binary_to_integer(Bin)+0.00
 	end.
 
 create_account(Req, State)->
@@ -136,10 +155,10 @@ create_account(Req, State)->
 	Zip = proplists:get_value(<<"zip">>, JsonData),
 	Comment = "Created by REST API",
 	io:format("Going to call create account ~n"),
-	case catch(mt4_direct_connection:create_account(binary_to_list(Name),binary_to_list(Address),binary_to_list(Email),binary_to_list(City),Comment,binary_to_list(Id),binary_to_list(Phone),binary_to_list(Country),binary_to_list(Zip),"GMART-USD2P",100)) of
+	case mt4_direct_connection:create_account(binary_to_list(Name),binary_to_list(Address),binary_to_list(Email),binary_to_list(City),Comment,binary_to_list(Id),binary_to_list(Phone),binary_to_list(Country),binary_to_list(Zip),"GMART-USD2P",100) of
 		{ok,Login} ->
 			ReplyBody = mochijson2:encode({struct, [{login, Login}]}),
-			{ok, Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
+			{ok, _Reply} = cowboy_req:reply(201, [], ReplyBody, Req),
 			{true, Req, State};
 		{error,_}->
 			{ok, Reply} = cowboy_req:reply(204, [], [], Req),
