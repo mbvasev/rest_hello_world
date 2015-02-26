@@ -10,5 +10,13 @@
 		stdlib
 	]},
 	{mod, {mt4_rest_api_app, []}},
-	{env, [{cowboy_port,8080}]}
+	{env, [{cowboy_port,8080},
+					{lager, [
+						{log_root, "c:/Users/Martin"},
+						{handlers, [
+							{lager_file_backend, [{file, "error.log"}, {level, error}]},
+							{lager_file_backend, [{file, "console.log"}, {level, info}]}
+						]}
+					]}
+	]}
 ]}.
