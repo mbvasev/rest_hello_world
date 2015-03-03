@@ -5,15 +5,20 @@
 -include("../../mt4_utils/include/managerapiwrapper.hrl").
 
 -define(MAX_TOKENS,3).
+-define(TARDING_SERVERS_RESOURCE,"tradingservers").
 -define(ACCOUNTS_RESOURCE,"accounts").
 -define(BALANCEOPS_RESOURCE,"balanceops").
 -define(RESOURCES,[?ACCOUNTS_RESOURCE,?BALANCEOPS_RESOURCE]).
 
--export([init/3, content_types_accepted/2, known_methods/2, allowed_methods/2, options/2, process_json_request/2, prepare_json_response/2]).
+-export([init/3, content_types_accepted/2, known_methods/2, allowed_methods/2, options/2, process_json_request/2, prepare_json_response/2, get_ballop_params/2]).
 %% -export([service_available/2]).
 -export([content_types_provided/2]).
 -compile([{parse_transform, lager_transform}]).
-init(_Transport, _Req, []) ->
+init(_Transport, Req, []) ->
+	{Origin, _} = cowboy_req:header(<<"origin">>,Req),
+	lager:info("Origin ~p",[Origin]),
+	lager:info("~p",[Req]),
+
 	{upgrade, protocol, cowboy_rest}.
 
 %% service_available(Req, State)->
@@ -27,9 +32,8 @@ init(_Transport, _Req, []) ->
 
 
 options(Req, State)->
- 	{Origin, _} = cowboy_req:header(<<"origin">>,Req),
 	Req1 = cowboy_req:set_resp_header(<<"access-control-allow-methods">>, <<"GET,POST,OPTIONS">>, Req),
-	Req2 = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>, Origin, Req1),
+	Req2 = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>,  <<"*">>, Req1),
 	Req4 = cowboy_req:set_resp_header(<<"access-control-allow-headers">>,<<"Origin, Content-Type, Accept">>,Req2),
 	Req5 = cowboy_req:set_resp_header(<<"access-control-max-age">>,<<"60">>,Req4),
 	{ok, Req5, State}.
@@ -62,11 +66,19 @@ allowed_methods(Req, State)->
 		{?ACCOUNTS_RESOURCE,_AccountId}->
 			{[<<"GET">>,<<"OPTIONS">>], Req, State};
 		{?ACCOUNTS_RESOURCE,_AccountId,?BALANCEOPS_RESOURCE} ->
-			{[<<"POST">>,<<"OPTIONS">>], Req, State}
+			{[<<"POST">>,<<"OPTIONS">>], Req, State};
+		_->
+			{halt, Req, State}
 	end.
 
+%% charsets_provided(Req, State)->
+%% 	io:format("charsets_provided \n"),
+%% 	{[ <<"UTF-8">>], Req, State}.
+
 content_types_accepted(Req, State) ->
-	{[{{<<"application">>, <<"json">>, []}, process_json_request}], Req, State}.
+	{ok,Res,_Re1} = cowboy_req:parse_header(<<"content-type">>, Req),
+	lager:info("parsed content-type header is: ~p ~n ",[Res]),
+	{[{{<<"application">>, <<"json">>,[{<<"charset">>,<<"utf-8">>}]}, process_json_request}], Req, State}.
 
 content_types_provided(Req, State) ->
 	{[{{<<"application">>, <<"json">>, []}, prepare_json_response}], Req, State}.
@@ -86,8 +98,7 @@ get_quered_resource(Req)->
 	end.
 
 process_json_request(Req, State) ->
-	{Origin, _} = cowboy_req:header(<<"origin">>,Req),
-	Reply = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>, Origin, Req),
+	Reply = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>,  <<"*">>, Req),
 	Resource = get_quered_resource(Req),
 	case Resource of
 		{?ACCOUNTS_RESOURCE}->
@@ -102,20 +113,14 @@ process_json_request(Req, State) ->
 
 create_balance_op(AccountId, Req, State)->
 	{ok, Body, _} = cowboy_req:body(Req),
+%% 	{ok,{Account,Amount,Comment}) = get_ballop_params(Body),
 	{struct, JsonData} = mochijson2:decode(Body),
 	Amount = proplists:get_value(<<"amount">>, JsonData),
 	Comment = proplists:get_value(<<"comment">>, JsonData),
-	Amm =  bin_to_num(Amount),
 	Login = list_to_integer(AccountId),
-%% 	ValResult =  validate_ballop_params(Login,Amm,Comment),
-%% 	if
-%% 		ValResult =:= false->
-%% 		cowboy_req:reply(400, [], [], Req),
-%% 		{halt, Req, State}
-%% 	end,
 
 	lager:info("going to call create_balance_operation Login: ~p ~p ~n",[Login,JsonData]),
-	case catch(mt4_direct_connection:create_balance_operation(Login,Amm,binary_to_list(Comment))) of
+	case catch(mt4_direct_connection:create_balance_operation(Login,Amount,binary_to_list(Comment))) of
 		{ok,Ticket}->
 			lager:info("balop created ticket: ~p",[Ticket]),
  			ReplyBody = mochijson2:encode({struct, [{ticket, Ticket}]}),
@@ -138,15 +143,20 @@ create_balance_op(AccountId, Req, State)->
 			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
 			{halt, Reply, State}
 	end.
-validate_ballop_params(Login,Ammount,Comment)->
-	is_integer(Login) andalso is_float(Ammount) andalso is_list(Comment).
 
-bin_to_num(Bin)->
-	try
-	    binary_to_float(Bin)
-	catch
-	    _:_ -> binary_to_integer(Bin)+0.00
+get_ballop_params(AccountId,ReqBody)->
+	{struct, JsonData} = mochijson2:decode(ReqBody),
+	Amount = proplists:get_value(<<"amount">>, JsonData),
+	Comment = proplists:get_value(<<"comment">>, JsonData),
+	Login = list_to_integer(AccountId),
+  res = is_integer(Login) andalso is_float(Amount) andalso is_list(binary_to_list(Comment)),
+
+	if(res =:= true)->
+		{ok,{Login,Amount,Comment}};
+		true->
+			badarg
 	end.
+
 
 create_account(Req, State)->
 	{ok, Body, _} = cowboy_req:body(Req),
@@ -162,10 +172,11 @@ create_account(Req, State)->
 	Group = proplists:get_value(<<"group">>, JsonData),
 	EnableAccount = proplists:get_value(<<"enabled">>, JsonData),
 	Leverage = proplists:get_value(<<"leverage">>, JsonData),
-	Comment = "dd",
+	Password = proplists:get_value(<<"password">>, JsonData),
+%% 	Comment = "dd",
 	lager:info("Going to call create account with params ~p",[JsonData]),
-	AcountInfo = #mt4_user{name = binary_to_list(Name),address =  binary_to_list(Address),email =binary_to_list(Email), city = binary_to_list(City),comment =  Comment,id =binary_to_list(Id),
-		phone = binary_to_list(Phone),country =  binary_to_list(Country),zipcode =  binary_to_list(Zip),group =  binary_to_list(Group),leverage =  binary_to_integer(Leverage),enable = EnableAccount},
+	AcountInfo = #mt4_user{name = binary_to_list(Name),address =  binary_to_list(Address),email =binary_to_list(Email), city = binary_to_list(City),comment =  "",id =binary_to_list(Id),
+		phone = binary_to_list(Phone),country =  binary_to_list(Country),zipcode =  binary_to_list(Zip),group =  binary_to_list(Group),leverage =  Leverage,enable = EnableAccount,password = binary_to_list(Password)},
 
 	case catch(mt4_direct_connection:create_account(AcountInfo)) of
 		{ok,Login} ->
@@ -195,8 +206,7 @@ create_account(Req, State)->
 
 
 prepare_json_response(Req, State) ->
-	{Origin, _} = cowboy_req:header(<<"origin">>,Req),
-	Req1 = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>, Origin, Req),
+	Req1 = cowboy_req:set_resp_header(<<"Access-Control-Allow-Origin">>,  <<"*">>, Req),
 	{Path,_} = cowboy_req:path(Req),
 	PathTokens = string:tokens(binary_to_list(Path),"/"),
 	LastToken = lists:last(PathTokens),
