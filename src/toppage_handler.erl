@@ -107,19 +107,23 @@ process_json_request(Req, State) ->
 			create_balance_op(AccountId,Reply, State);
 		_ ->
 			lager:error("unknown resource: ~p",[Resource]),
-			{ok, Reply} = cowboy_req:reply(404, [], [], Req),
-			{halt, Reply, State}
+			{ok, Reply1} = cowboy_req:reply(404, [], [], Req),
+			{halt, Reply1, State}
 	end.
 
 create_balance_op(AccountId, Req, State)->
 	{ok, Body, _} = cowboy_req:body(Req),
-%% 	{ok,{Account,Amount,Comment}) = get_ballop_params(Body),
-	{struct, JsonData} = mochijson2:decode(Body),
-	Amount = proplists:get_value(<<"amount">>, JsonData),
-	Comment = proplists:get_value(<<"comment">>, JsonData),
-	Login = list_to_integer(AccountId),
+	{ok,{Login,Amount,Comment}} =try get_ballop_params(AccountId,Body) of
+																 
+	catch
+	    _:_  ->
+	end,
+%% 	{struct, JsonData} = mochijson2:decode(Body),
+%% 	Amount = proplists:get_value(<<"amount">>, JsonData),
+%% 	Comment = proplists:get_value(<<"comment">>, JsonData),
+%% 	Login = list_to_integer(AccountId),
 
-	lager:info("going to call create_balance_operation Login: ~p ~p ~n",[Login,JsonData]),
+	lager:info("going to call create_balance_operation Login: ~p ~p ~p ~n",[Login,Amount,Comment]),
 	case catch(mt4_direct_connection:create_balance_operation(Login,Amount,binary_to_list(Comment))) of
 		{ok,Ticket}->
 			lager:info("balop created ticket: ~p",[Ticket]),
@@ -144,15 +148,16 @@ create_balance_op(AccountId, Req, State)->
 			{halt, Reply, State}
 	end.
 
+-spec get_ballop_params(AccountId::nonempty_string(), ReqBody::binary()) -> {ok,{Login::mt4_login(),Amount::float(),Comment::string()}}|badarg.
 get_ballop_params(AccountId,ReqBody)->
 	{struct, JsonData} = mochijson2:decode(ReqBody),
 	Amount = proplists:get_value(<<"amount">>, JsonData),
 	Comment = proplists:get_value(<<"comment">>, JsonData),
 	Login = list_to_integer(AccountId),
-  res = is_integer(Login) andalso is_float(Amount) andalso is_list(binary_to_list(Comment)),
+  Res = is_integer(Login) andalso is_float(Amount) andalso is_list(binary_to_list(Comment)),
 
-	if(res =:= true)->
-		{ok,{Login,Amount,Comment}};
+	if(Res =:= true)->
+		{ok,{Login,Amount,binary_to_list(Comment)}};
 		true->
 			badarg
 	end.

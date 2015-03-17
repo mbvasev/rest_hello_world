@@ -14,5 +14,5 @@
 get_ballop_params_test_() ->
 %%   Req = cowboy_req:new(),
   [?_assertEqual({ok,{1122,500.78,"some comment"}},toppage_handler:get_ballop_params("1122",<<"{\"amount\":500.78,\"comment\":\"some comment\"}">>)),
-  ?_assertEqual({error,_},toppage_handler:get_ballop_params("1122",<<"{\"amount\":500.78,\"commen\":\"some comment\"}">>))].
+   ?_assertEqual(badarg,toppage_handler:get_ballop_params("1122",<<"{\"amount\":500.78,\"commen\":\"some comment\"}">>))].
 
