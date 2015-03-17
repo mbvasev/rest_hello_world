@@ -1,0 +1,7 @@
+{release,
+ {"mt4_rest_api", "1.0.0"},
+ {erts, "6.3"},
+ [{kernel, "3.1"},
+  {stdlib, "2.3"},
+  {mt4_utils, "1", permanent},
+  {mt4_rest_api, "1", transient}]}.
